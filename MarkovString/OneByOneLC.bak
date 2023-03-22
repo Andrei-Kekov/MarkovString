@@ -1,0 +1,176 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+
+namespace MarkovString
+{
+    public class OneByOneLC : IStringGenerator
+    {
+        private readonly List<char> alphabet;
+        private readonly StringBuilder sb;
+        private readonly WeightedRandom wrandom;
+        private readonly int[] starts;
+        private readonly int[][] pairs;
+        private readonly int[] ends;
+        private readonly double[] endProbs;
+        private readonly double[] k;
+
+        public OneByOneLC(string[] sample, WeightedRandom wrandom)
+        {
+            if (sample == null)
+            {
+                throw new ArgumentNullException();
+            }
+
+            sample = sample.Where(s => !string.IsNullOrEmpty(s)).ToArray();
+
+            if (sample.Length == 0)
+            {
+                throw new ArgumentException();
+            }
+
+            if (wrandom is null)
+            {
+                throw new ArgumentNullException();
+            }
+            else
+            {
+                this.wrandom = wrandom;
+            }
+
+            MaxLength = int.MaxValue;
+            sb = new StringBuilder();
+            alphabet = new List<char>();
+            InitializeAlphabet(sample);
+            starts = new int[alphabet.Count];
+            pairs = new int[alphabet.Count][];
+            ends = new int[alphabet.Count];
+            endProbs = new double[alphabet.Count];
+            k = new double[sample.Max(s => s.Length)];
+
+            for (int i = 0; i < alphabet.Count; i++)
+            {
+                pairs[i] = new int[alphabet.Count];
+            }
+
+            foreach (string s in sample)
+            {
+                AnalyzeString(s);
+            }
+
+            InitializeProbabilities(sample);
+        }
+
+        public OneByOneLC(string[] sample) : this(sample, new WeightedRandom())
+        {
+        }
+
+        public OneByOneLC(string[] sample, Random random) : this(sample, new WeightedRandom(random))
+        {
+        }
+
+        public int MaxLength { get; set; }
+
+        public string GenerateString()
+        {
+            sb.Clear();
+            int i, j;
+            i = wrandom.GetRandomIndex(starts);
+            sb.Append(alphabet[i]);
+            bool itsTimeToStop;
+
+            while (sb.Length < MaxLength)
+            {
+                if (sb.Length >= k.Length)
+                {
+                    itsTimeToStop = true;
+                }
+                else
+                {
+                    itsTimeToStop = wrandom.GetRandomBool(Math.Min(endProbs[i] * k[sb.Length], 1.0));
+                }
+
+                if (itsTimeToStop && ends[i] > 0)
+                {
+                    break;
+                }
+                else if (pairs[i].Sum() == 0)
+                {
+                    break;
+                }
+                else
+                {
+                    j = wrandom.GetRandomIndex(pairs[i]);
+                    sb.Append(alphabet[j]);
+                    i = j;
+                }
+            }
+
+            return sb.ToString();
+        }
+
+        private void InitializeAlphabet(string[] sample)
+        {
+            foreach (string s in sample)
+            {
+                foreach (char c in s)
+                {
+                    if (!alphabet.Contains(c))
+                    {
+                        alphabet.Add(c);
+                    }
+                }
+            }
+        }
+
+        private void AnalyzeString(string s)
+        {
+            int i, j;
+            i = alphabet.IndexOf(s[0]);
+            starts[i]++;
+
+            for (int pos = 1; pos < s.Length; pos++)
+            {
+                j = alphabet.IndexOf(s[pos]);
+                pairs[i][j]++;
+                i = j;
+            }
+
+            ends[i]++;
+        }
+
+        private void InitializeProbabilities(string[] sample)
+        {
+            double sampleLength = sample.Length;
+            double baseEndProb = sampleLength / sample.Sum(s => s.Length);
+            int i;
+
+            for (i = 0; i < alphabet.Count; i++)
+            {
+                endProbs[i] = (double)ends[i] / sample.Sum(s => s.Length); 
+            }
+
+            double[] lengthProb = new double[k.Length];
+
+            for (i = 1; i < k.Length; i++)
+            {
+                lengthProb[i] = sample.Count(s => s.Length == i) / sampleLength;
+            }
+
+            k[1] = lengthProb[1] / baseEndProb;
+
+            for (i = 2; i < k.Length; i++)
+            {
+                if (lengthProb[i - 1] > 0.0)
+                {
+                    k[i] = Math.Max((1.0 - lengthProb[i] / lengthProb[i - 1]) / baseEndProb, 0.0);
+                }
+                else
+                {
+                    k[i] = 0.0;
+                }
+            }
+        }
+    }
+}
